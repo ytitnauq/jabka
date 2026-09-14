@@ -1,0 +1,337 @@
+HTML
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chytání jablek</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* Zamezí scrollování a gestům prohlížeče */
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 70%, #8FBC8F 70%, #2E8B57 100%);
+        }
+
+        /* Překryvná obrazovka pro Konec hry / Start */
+        #uiOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+
+        #uiOverlay h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #uiOverlay p {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 32px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 50px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+            background-color: #45a049;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="uiOverlay">
+        <h1 id="uiTitle">Chytání jablek</h1>
+        <p id="uiScoreText">Dotkni se obrazovky a posouvej košík</p>
+        <button id="startBtn" class="btn">HRAŤ</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const uiOverlay = document.getElementById('uiOverlay');
+        const uiTitle = document.getElementById('uiTitle');
+        const uiScoreText = document.getElementById('uiScoreText');
+        const startBtn = document.getElementById('startBtn');
+
+        // Stav hry
+        let gameActive = false;
+        let score = 0;
+        let animationFrameId;
+
+        // Rozměry herni plochy (přizpůsobení oknu)
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Aktualizace pozice košíku při změně velikosti
+            if (basket) {
+                basket.y = canvas.height - basket.height - 20;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Herní objekty
+        const basket = {
+            width: 100,
+            height: 30,
+            x: 0,
+            y: 0
+        };
+
+        let apples = [];
+        let spawnTimer = 0;
+        let spawnInterval = 60; // Snímky mezi spawnutím nového jablka
+        let baseSpeed = 4;
+
+        // Inicializace rozměrů
+        resizeCanvas();
+
+        // Nástroje pro kreslení grafiky pomocí Canvas2D
+        function drawBasket() {
+            ctx.save();
+            // Tělo košíku
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.roundRect(basket.x, basket.y, basket.width, basket.height, 10);
+            ctx.fill();
+            
+            // Textura / okraj košíku
+            ctx.strokeStyle = '#5C2E0B';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Vzor výpletu
+            ctx.strokeStyle = '#A0522D';
+            ctx.lineWidth = 2;
+            for (let i = basket.x + 15; i < basket.x + basket.width; i += 15) {
+                ctx.beginPath();
+                ctx.moveTo(i, basket.y);
+                ctx.lineTo(i, basket.y + basket.height);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawApple(apple) {
+            ctx.save();
+            // Jablko (červený kruh)
+            ctx.fillStyle = '#FF2400';
+            ctx.beginPath();
+            ctx.arc(apple.x, apple.y, apple.radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Stopka
+            ctx.strokeStyle = '#4A2F0F';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(apple.x, apple.y - apple.radius);
+            ctx.lineTo(apple.x + 2, apple.y - apple.radius - 8);
+            ctx.stroke();
+
+            // List
+            ctx.fillStyle = '#32CD32';
+            ctx.beginPath();
+            ctx.ellipse(apple.x + 5, apple.y - apple.radius - 6, 4, 2, Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Odlesk
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.beginPath();
+            ctx.arc(apple.x - apple.radius/3, apple.y - apple.radius/3, apple.radius/4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawScore() {
+            ctx.save();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 4;
+            ctx.font = 'bold 32px sans-serif';
+            ctx.textAlign = 'left';
+            const text = `Skóre: ${score}`;
+            ctx.strokeText(text, 20, 45);
+            ctx.fillText(text, 20, 45);
+            ctx.restore();
+        }
+
+        // Vytvoření nového jablka
+        function createApple() {
+            const radius = 18;
+            const x = Math.random() * (canvas.width - radius * 2) + radius;
+            // Rychlost se mírně zvyšuje se skóre
+            const speed = baseSpeed + Math.floor(score / 5) * 0.5 + Math.random();
+            apples.push({ x, y: -radius, radius, speed });
+        }
+
+        // Ovládání dotykem i myší
+        function handleMove(clientX) {
+            if (!gameActive) return;
+            // Umístění středu košíku na pozici doteku/kurzoru
+            basket.x = clientX - basket.width / 2;
+
+            // Omezení hranicemi obrazovky
+            if (basket.x < 0) basket.x = 0;
+            if (basket.x + basket.width > canvas.width) {
+                basket.x = canvas.width - basket.width;
+            }
+        }
+
+        // Event Listeners pro dotyk a myš
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                handleMove(e.touches[0].clientX);
+            }
+        }, { passive: true });
+
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                handleMove(e.touches[0].clientX);
+            }
+        }, { passive: true });
+
+        window.addEventListener('mousemove', (e) => {
+            handleMove(e.clientX);
+        });
+
+        // Hlavní herní smyčka
+        function gameLoop() {
+            if (!gameActive) return;
+
+            // Vyčištění plátna
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Generování jablek
+            spawnTimer++;
+            if (spawnTimer >= spawnInterval) {
+                createApple();
+                spawnTimer = 0;
+                // Postupné zrychlování spawnování
+                if (spawnInterval > 25) spawnInterval -= 0.1;
+            }
+
+            // Aktualizace a vykreslení jablek
+            for (let i = apples.length - 1; i >= 0; i--) {
+                let apple = apples[i];
+                apple.y += apple.speed;
+
+                // Vykreslit jablko
+                drawApple(apple);
+
+                // Detekce kolize s košíkem
+                // Kontrola zda spodní část jablka dosáhla košíku
+                if (
+                    apple.y + apple.radius >= basket.y &&
+                    apple.y - apple.radius <= basket.y + basket.height &&
+                    apple.x + apple.radius >= basket.x &&
+                    apple.x - apple.radius <= basket.x + basket.width
+                ) {
+                    // Chyceno!
+                    score++;
+                    apples.splice(i, 1);
+                    continue;
+                }
+
+                // Detekce dopadu na zem (Konec hry)
+                if (apple.y - apple.radius > canvas.height) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // Vykreslení košíku a skóre
+            drawBasket();
+            drawScore();
+
+            // Další snímek
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // Start hry
+        function startGame() {
+            score = 0;
+            apples = [];
+            spawnTimer = 0;
+            spawnInterval = 60;
+            gameActive = true;
+            
+            // Nastavení košíku do středu
+            basket.width = Math.min(120, canvas.width * 0.25); // Šířka košíku se přizpůsobí displeji
+            basket.x = (canvas.width - basket.width) / 2;
+            basket.y = canvas.height - basket.height - 30;
+
+            uiOverlay.classList.add('hidden');
+            
+            cancelAnimationFrame(animationFrameId);
+            gameLoop();
+        }
+
+        // Konec hry
+        function gameOver() {
+            gameActive = false;
+            cancelAnimationFrame(animationFrameId);
+
+            uiTitle.innerText = "KONEC HRY";
+            uiScoreText.innerText = `Chytil jsi ${score} ${getScoreForm(score)}!`;
+            startBtn.innerText = "HRÁT ZNOVU";
+            uiOverlay.classList.remove('hidden');
+        }
+
+        // Pomocná funkce pro češtinu (skloňování slova jablko)
+        function getScoreForm(num) {
+            if (num === 1) return "jablko";
+            if (num >= 2 && num <= 4) return "jablka";
+            return "jablek";
+        }
+
+        // Listener pro tlačítko Start
+        startBtn.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
